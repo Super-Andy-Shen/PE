@@ -55,23 +55,21 @@ void printfile(const char* path)
 		cout << "e_magic :" << hex << uppercase << dos_header->e_magic << endl;
 		IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*) ((DWORD)filebuffer + dos_header->e_lfanew);
 
-		IMAGE_FILE_HEADER* file_header = (IMAGE_FILE_HEADER*) ((DWORD)nt_header + 4);
-		cout << file_header->SizeOfOptionalHeader << endl;
+		IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+			//(IMAGE_FILE_HEADER*) ((DWORD)nt_header + 4);
 
-		IMAGE_OPTIONAL_HEADER* optional_header = (IMAGE_OPTIONAL_HEADER*)((DWORD)file_header + sizeof(IMAGE_FILE_HEADER));
+		IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+			//(IMAGE_OPTIONAL_HEADER*)((DWORD)file_header + sizeof(IMAGE_FILE_HEADER));
 		
-		//cout << optional_header->BaseOfCode << endl;
-		//IMAGE_SECTION_HEADER* section_header =(IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+		IMAGE_SECTION_HEADER* section_header =(IMAGE_SECTION_HEADER*)((DWORD)optional_header + sizeof(IMAGE_OPTIONAL_HEADER));
 		
-		/*for (auto i = 0; i < file_header->NumberOfSections; i++)
+		for (auto i = 0; i < file_header->NumberOfSections; i++)
 		{
 			cout << "Name :" << section_header[i].Name << endl;
-		}*/
+		}
 		return;
 	}
 }
-
-
 int main()
 {
 	char path[] = "C:\\PE\\PETool.exe";
