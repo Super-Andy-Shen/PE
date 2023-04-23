@@ -104,7 +104,7 @@ void filebuffer_to_imagebuffer_to_disk(const char* path)
 	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
 	// memory allocation
 	DWORD image_size = optional_header->SizeOfImage;
-	VOID* imagebuffer = new int[image_size];
+	VOID* imagebuffer = new int[image_size+4096];
 	if (!imagebuffer)
 	{
 		cout << "failed to allocate memory." << endl;
@@ -188,8 +188,6 @@ int addnewsection(VOID* imagebuffer, IMAGE_DOS_HEADER* dos_header, IMAGE_FILE_HE
 	DWORD opt_offset = ((DWORD)optional_header - (DWORD)dos_header);
 	IMAGE_OPTIONAL_HEADER* optheader = (IMAGE_OPTIONAL_HEADER*)((DWORD)imagebuffer + opt_offset);
 	optheader->SizeOfImage = optional_header->SizeOfImage + 0x1000;
-	//add section to the last
-	 //imagebuffer = (void*) realloc(imagebuffer, optheader->SizeOfImage);
 	return 0;
 }
 int main()
