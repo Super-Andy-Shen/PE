@@ -3,6 +3,8 @@
 #include <stdio.h>
 using namespace std;
 // readfile(path string,buffer pointer) -----> read file, write file in heap, return size of file.
+int merge_section(LPVOID filebuffer, VOID* imagebuffer);
+int enlarge_section(LPVOID filebuffer, VOID* enlarge_buffer);
 int addnewsection(VOID* imagebuffer, IMAGE_DOS_HEADER* dos_header, IMAGE_FILE_HEADER* file_header, IMAGE_OPTIONAL_HEADER* optional_header, IMAGE_SECTION_HEADER* section_header);
 DWORD readfile(const char* path, LPVOID* filebuffer)
 {
@@ -104,7 +106,7 @@ void filebuffer_to_imagebuffer_to_disk(const char* path)
 	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
 	// memory allocation
 	DWORD image_size = optional_header->SizeOfImage;
-	VOID* imagebuffer = new int[image_size+4096];
+	VOID* imagebuffer = new int[image_size];
 	if (!imagebuffer)
 	{
 		cout << "failed to allocate memory." << endl;
@@ -120,7 +122,12 @@ void filebuffer_to_imagebuffer_to_disk(const char* path)
 		void* dest = (void*)((DWORD)imagebuffer + section_header[i].VirtualAddress);
 		memcpy(dest,source, section_header[i].SizeOfRawData);
 	}
-	addnewsection(imagebuffer, dos_header, file_header, optional_header, section_header);
+	//addnewsection(imagebuffer, dos_header, file_header, optional_header, section_header);
+	
+	//扩大一个节
+	// enlarge_section(filebuffer, imagebuffer);
+	//合并节
+	merge_section(filebuffer, imagebuffer);
 	//imagebuffer -> newbuffer -> disk
 	int newbuffer_size = section_header[num_sections - 1].VirtualAddress + section_header[num_sections - 1].Misc.VirtualSize;
 	VOID* newbuffer = new int[newbuffer_size];
@@ -136,9 +143,10 @@ void filebuffer_to_imagebuffer_to_disk(const char* path)
 		void* dest = (void*)((DWORD)newbuffer + section_header[i].PointerToRawData);
 		memcpy(dest, source, section_header[i].SizeOfRawData);// not too sure 如果我们在imagebuffer里面植入代码，sizeofrawdata不够怎么办
 	}
+	DWORD new_filesize = filesize;
 	FILE* file = nullptr;
 	file = fopen("C:\\PE\\PEcopy.exe", "wb");
-	fwrite(newbuffer, filesize, 1, file);
+	fwrite(newbuffer, new_filesize, 1, file);
 	fclose(file);
 	delete[] filebuffer;
 	delete[] imagebuffer;
@@ -188,8 +196,53 @@ int addnewsection(VOID* imagebuffer, IMAGE_DOS_HEADER* dos_header, IMAGE_FILE_HE
 	DWORD opt_offset = ((DWORD)optional_header - (DWORD)dos_header);
 	IMAGE_OPTIONAL_HEADER* optheader = (IMAGE_OPTIONAL_HEADER*)((DWORD)imagebuffer + opt_offset);
 	optheader->SizeOfImage = optional_header->SizeOfImage + 0x1000;
+	memcpy(sheader[new_num_section - 1].Name, ".my", 9);
 	return 0;
 }
+int enlarge_section(LPVOID filebuffer, VOID* enlarge_buffer)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	DWORD num_sections = file_header->NumberOfSections; 
+
+
+	DWORD section_offset = ((DWORD)section_header - (DWORD)dos_header);
+	IMAGE_SECTION_HEADER* sheader = (IMAGE_SECTION_HEADER*)((DWORD)enlarge_buffer + section_offset);
+	DWORD opt_offset = ((DWORD)optional_header - (DWORD)dos_header);
+	IMAGE_OPTIONAL_HEADER* optheader = (IMAGE_OPTIONAL_HEADER*)((DWORD)enlarge_buffer + opt_offset);
+
+	sheader[num_sections - 1].SizeOfRawData += 0x1000;
+	sheader[num_sections - 1].Misc.VirtualSize += 0x1000;
+	optheader->SizeOfImage = optional_header->SizeOfImage + 0x1000;
+	return 0;
+}
+int merge_section(LPVOID filebuffer, VOID* imagebuffer)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	DWORD num_sections = file_header->NumberOfSections;
+
+	DWORD section_offset = ((DWORD)section_header - (DWORD)dos_header);
+	IMAGE_SECTION_HEADER* sheader = (IMAGE_SECTION_HEADER*)((DWORD)imagebuffer + section_offset);
+	DWORD opt_offset = ((DWORD)optional_header - (DWORD)dos_header);
+	IMAGE_OPTIONAL_HEADER* optheader = (IMAGE_OPTIONAL_HEADER*)((DWORD)imagebuffer + opt_offset);
+	DWORD file_offset = ((DWORD)file_header - (DWORD)dos_header);
+	IMAGE_FILE_HEADER* fheader = (IMAGE_FILE_HEADER*)((DWORD)imagebuffer + file_offset);
+
+
+	sheader[0].SizeOfRawData = optheader->SizeOfImage - sheader[0].VirtualAddress;
+	sheader[0].Misc.VirtualSize = optheader->SizeOfImage - sheader[0].VirtualAddress;
+	fheader->NumberOfSections = 1;
+	sheader[0].Characteristics = 0xFF50DAE0; //打开所有权限
+	return 0;
+}
+
 int main()
 {
 	char path[] = "C:\\PE\\PETool.exe";
