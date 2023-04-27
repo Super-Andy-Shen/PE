@@ -75,7 +75,7 @@ void printfile(const char* path)
 		return;
 	}
 }
-DWORD RVA_to_FOA(void* imagebuffer, DWORD rva, IMAGE_SECTION_HEADER* section_header, IMAGE_FILE_HEADER* file_header)
+DWORD RVA_to_FOA(DWORD rva, IMAGE_SECTION_HEADER* section_header, IMAGE_FILE_HEADER* file_header)
 {
 	DWORD num_sections = file_header->NumberOfSections;
 	DWORD rva_offset, foa = 0;
@@ -90,6 +90,7 @@ DWORD RVA_to_FOA(void* imagebuffer, DWORD rva, IMAGE_SECTION_HEADER* section_hea
 	}
 	return foa;
 }
+
 void filebuffer_to_imagebuffer_to_disk(const char* path)
 {
 	LPVOID filebuffer;
@@ -123,11 +124,10 @@ void filebuffer_to_imagebuffer_to_disk(const char* path)
 		memcpy(dest,source, section_header[i].SizeOfRawData);
 	}
 	//addnewsection(imagebuffer, dos_header, file_header, optional_header, section_header);
-	
 	//扩大一个节
 	// enlarge_section(filebuffer, imagebuffer);
 	//合并节
-	merge_section(filebuffer, imagebuffer);
+	//merge_section(filebuffer, imagebuffer);
 	//imagebuffer -> newbuffer -> disk
 	int newbuffer_size = section_header[num_sections - 1].VirtualAddress + section_header[num_sections - 1].Misc.VirtualSize;
 	VOID* newbuffer = new int[newbuffer_size];
@@ -240,14 +240,74 @@ int merge_section(LPVOID filebuffer, VOID* imagebuffer)
 	sheader[0].Misc.VirtualSize = optheader->SizeOfImage - sheader[0].VirtualAddress;
 	fheader->NumberOfSections = 1;
 	sheader[0].Characteristics = 0xFF50DAE0; //打开所有权限
+	memset(sheader + 1, 0, sizeof(IMAGE_SECTION_HEADER)*(num_sections-1)); // 清0
 	return 0;
 }
+DWORD find_function_addressRVA_byname(LPVOID filebuffer, const char* name)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	_IMAGE_EXPORT_DIRECTORY* extable = (_IMAGE_EXPORT_DIRECTORY*)((DWORD)filebuffer + RVA_to_FOA(optional_header->DataDirectory[0].VirtualAddress, section_header, file_header));
+	cout << "DLL's name : "<<(char*)((DWORD)filebuffer + RVA_to_FOA(extable->Name, section_header, file_header)) << endl; // Test dll's name
+	int* name_address = (int*) ((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNames, section_header, file_header)); //名字表，宽度4，双子就行
+	short* ordinal_address = (short*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNameOrdinals, section_header, file_header)); //序号表，单字节
+	int* function_address = (int*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfFunctions, section_header, file_header));//函数表
+	DWORD index = -1;
+	for(int i = 0; i< extable->NumberOfNames;i++)
+	{
+		char* name_in_table = (char*)((DWORD)filebuffer + RVA_to_FOA(name_address[i], section_header, file_header));
+		if(!strcmp(name, name_in_table))
+		{
+			index = i;
+		}
+	}
+	if (index == -1 ) { cout << "no matching name" << endl; return 1; }
+   //find address at the ordinal table
+	DWORD ordinal_val = ordinal_address[index];
+	if (ordinal_val >= extable->NumberOfFunctions) { cout << "no matching ordinal value" << endl; return 1;}
+	cout << name<<"'s RVA is "<<hex << function_address[ordinal_val] << endl;
+	return 0;
+}
+DWORD print_export_table(LPVOID filebuffer)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	_IMAGE_EXPORT_DIRECTORY* extable = (_IMAGE_EXPORT_DIRECTORY*)((DWORD)filebuffer + RVA_to_FOA(optional_header->DataDirectory[0].VirtualAddress, section_header, file_header));
+	cout << "DLL's name : " << (char*)((DWORD)filebuffer + RVA_to_FOA(extable->Name, section_header, file_header)) << endl; // Test dll's name
+	int* name_address = (int*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNames, section_header, file_header)); //名字表，宽度4，双子就行
+	short* ordinal_address = (short*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNameOrdinals, section_header, file_header)); //序号表，单字节
+	int* function_address = (int*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfFunctions, section_header, file_header));//函数表
+	for (int i = 0; i < extable->NumberOfFunctions;i++)
+	{
+		for (int j = 0; j < extable->NumberOfNames; j++)
+		{
+			if (ordinal_address[j] == i)
+			{
+				cout << "Address Name: " << (char*)((DWORD)filebuffer + RVA_to_FOA(name_address[j], section_header, file_header)) << " Ordinal: " << i + extable->Base << " Function RVA: " << function_address[i] << endl;
+			}
+		}
 
+	}
+	return 0;
+}
 int main()
 {
-	char path[] = "C:\\PE\\PETool.exe";
-	//printfile(path);
-	filebuffer_to_imagebuffer_to_disk(path);
-
+	char path[] = "C:\\PE\\advancedolly.dll";
+	//filebuffer_to_imagebuffer_to_disk(path);
+	LPVOID filebuffer;
+	DWORD filesize = readfile(path, &filebuffer);
+	if (!filesize)
+	{
+		cout << "failed to readfile at address: " << path << endl;
+		return 0;
+	}
+	find_function_addressRVA_byname(filebuffer, "_ODBG_Plugindata");
+	print_export_table(filebuffer);
 	return 0;
 }
