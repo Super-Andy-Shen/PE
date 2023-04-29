@@ -81,7 +81,7 @@ DWORD RVA_to_FOA(DWORD rva, IMAGE_SECTION_HEADER* section_header, IMAGE_FILE_HEA
 	DWORD rva_offset, foa = 0;
 	for (int i = 0; i < num_sections; i++)
 	{
-		if ((rva > section_header[i].VirtualAddress) && (rva < section_header[i].VirtualAddress + section_header[i].Misc.VirtualSize))
+		if ((rva >= section_header[i].VirtualAddress) && (rva < section_header[i].VirtualAddress + section_header[i].Misc.VirtualSize))
 		{
 			rva_offset = rva - section_header[i].VirtualAddress;
 			foa = section_header[i].PointerToRawData + rva_offset;
@@ -255,7 +255,7 @@ DWORD find_function_addressRVA_byname(LPVOID filebuffer, const char* name)
 	int* name_address = (int*) ((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNames, section_header, file_header)); //名字表，宽度4，双子就行
 	short* ordinal_address = (short*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNameOrdinals, section_header, file_header)); //序号表，单字节
 	int* function_address = (int*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfFunctions, section_header, file_header));//函数表
-	DWORD index = -1;
+	DWORD index = -1;  
 	for(int i = 0; i< extable->NumberOfNames;i++)
 	{
 		char* name_in_table = (char*)((DWORD)filebuffer + RVA_to_FOA(name_address[i], section_header, file_header));
@@ -296,6 +296,32 @@ DWORD print_export_table(LPVOID filebuffer)
 	}
 	return 0;
 }
+DWORD print_relocation_table(LPVOID filebuffer)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	IMAGE_BASE_RELOCATION* relocation_table = (IMAGE_BASE_RELOCATION*)((DWORD)filebuffer + RVA_to_FOA(optional_header->DataDirectory[5].VirtualAddress, section_header, file_header));
+	IMAGE_BASE_RELOCATION* cur = relocation_table;
+	int k = 1;
+	while ((cur->SizeOfBlock != 0x0) || (cur->VirtualAddress != 0x0))
+	{
+		cout << "block: " << k << endl;
+		DWORD num_chunks = (cur->SizeOfBlock - 8) / 2;
+		WORD* chunk = (WORD*)((BYTE*)cur + 8);
+		for (int i = 0; i < num_chunks; i++)
+		{
+			cout << "[" << i + 1 << "]" << "  RVA: "<<hex<<((*chunk)&0x0fff) + cur->VirtualAddress <<"  val: "<<(*chunk >> 12) << endl;
+			chunk++;
+		}
+		cout << endl;
+		cur = (IMAGE_BASE_RELOCATION*)((DWORD)cur + (cur->SizeOfBlock));
+		k++;
+	}
+	return 0;
+}
 int main()
 {
 	char path[] = "C:\\PE\\advancedolly.dll";
@@ -307,7 +333,8 @@ int main()
 		cout << "failed to readfile at address: " << path << endl;
 		return 0;
 	}
-	find_function_addressRVA_byname(filebuffer, "_ODBG_Plugindata");
-	print_export_table(filebuffer);
+	//find_function_addressRVA_byname(filebuffer, "_ODBG_Plugindata");
+	//print_export_table(filebuffer);
+    print_relocation_table(filebuffer);
 	return 0;
 }
