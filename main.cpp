@@ -6,6 +6,7 @@ using namespace std;
 int merge_section(LPVOID filebuffer, VOID* imagebuffer);
 int enlarge_section(LPVOID filebuffer, VOID* enlarge_buffer);
 int addnewsection(VOID* imagebuffer, IMAGE_DOS_HEADER* dos_header, IMAGE_FILE_HEADER* file_header, IMAGE_OPTIONAL_HEADER* optional_header, IMAGE_SECTION_HEADER* section_header);
+char* convert_name_byRVA(LPVOID filebuffer, DWORD rva);
 DWORD readfile(const char* path, LPVOID* filebuffer)
 {
 	FILE* file = nullptr;
@@ -278,6 +279,7 @@ DWORD print_export_table(LPVOID filebuffer)
 	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
 	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
 	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	if (optional_header->DataDirectory[0].VirtualAddress == 0) cout << "no export table" << endl;
 	_IMAGE_EXPORT_DIRECTORY* extable = (_IMAGE_EXPORT_DIRECTORY*)((DWORD)filebuffer + RVA_to_FOA(optional_header->DataDirectory[0].VirtualAddress, section_header, file_header));
 	cout << "DLL's name : " << (char*)((DWORD)filebuffer + RVA_to_FOA(extable->Name, section_header, file_header)) << endl; // Test dll's name
 	int* name_address = (int*)((DWORD)filebuffer + RVA_to_FOA(extable->AddressOfNames, section_header, file_header)); //名字表，宽度4，双子就行
@@ -303,6 +305,7 @@ DWORD print_relocation_table(LPVOID filebuffer)
 	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
 	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
 	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	if (optional_header->DataDirectory[5].VirtualAddress == 0) cout << "no relocation table" << endl;
 	IMAGE_BASE_RELOCATION* relocation_table = (IMAGE_BASE_RELOCATION*)((DWORD)filebuffer + RVA_to_FOA(optional_header->DataDirectory[5].VirtualAddress, section_header, file_header));
 	IMAGE_BASE_RELOCATION* cur = relocation_table;
 	int k = 1;
@@ -322,9 +325,72 @@ DWORD print_relocation_table(LPVOID filebuffer)
 	}
 	return 0;
 }
+char* convert_name_byRVA(LPVOID filebuffer, DWORD rva)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	return (char*)((DWORD)filebuffer + RVA_to_FOA(rva, section_header, file_header));
+}
+DWORD print_import_table(LPVOID filebuffer)
+{
+	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)filebuffer;
+	IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)((DWORD)filebuffer + dos_header->e_lfanew);
+	IMAGE_FILE_HEADER* file_header = &nt_header->FileHeader;
+	IMAGE_OPTIONAL_HEADER* optional_header = &nt_header->OptionalHeader;
+	IMAGE_SECTION_HEADER* section_header = (IMAGE_SECTION_HEADER*)((DWORD)optional_header + file_header->SizeOfOptionalHeader);
+	if (optional_header->DataDirectory[1].VirtualAddress == 0) cout << "no import table" << endl;
+	IMAGE_IMPORT_DESCRIPTOR* import_table = (IMAGE_IMPORT_DESCRIPTOR*)((DWORD)filebuffer + RVA_to_FOA(optional_header->DataDirectory[1].VirtualAddress, section_header, file_header));
+	IMAGE_IMPORT_DESCRIPTOR* cur = import_table;
+	while (true)
+	{
+		if ((cur->Characteristics == 0 || cur->OriginalFirstThunk == 0) && cur->TimeDateStamp == 0 && cur->ForwarderChain == 0 && cur->Name == 0 && cur->FirstThunk == 0) break;
+		cout << "dll's name is : "<<convert_name_byRVA(filebuffer, cur->Name) << endl;
+		IMAGE_THUNK_DATA32* ori = (IMAGE_THUNK_DATA32*)((DWORD)filebuffer + RVA_to_FOA(cur->OriginalFirstThunk, section_header, file_header));
+		bool flag = true;
+		cout << "OriginalFirstThunk" << endl;
+		while(ori->u1.Function != 0)
+		{
+			DWORD cur_ori = ori->u1.Function;
+			DWORD value = cur_ori & 0x7fffffff;
+			if (cur_ori >> 31 == 0)
+			{
+				IMAGE_IMPORT_BY_NAME* fun_name = (IMAGE_IMPORT_BY_NAME*)((DWORD)filebuffer + RVA_to_FOA(value, section_header, file_header));
+				cout << "By name : "<<fun_name->Name << endl;
+			}
+			else
+			{
+				cout << "By ordinal : " <<hex<< value << endl;
+			}
+			ori++;
+		}
+		cout << "FirstThunk" << endl;
+		IMAGE_THUNK_DATA32* first_thunk = (IMAGE_THUNK_DATA32*)((DWORD)filebuffer + RVA_to_FOA(cur->FirstThunk, section_header, file_header));
+		while (first_thunk->u1.Function != 0)
+		{
+			DWORD cur_first = first_thunk->u1.Function;
+			DWORD value = cur_first & 0x7fffffff;
+			if (cur_first >> 31 == 0)
+			{
+				IMAGE_IMPORT_BY_NAME* fun_name = (IMAGE_IMPORT_BY_NAME*)((DWORD)filebuffer + RVA_to_FOA(value, section_header, file_header));
+				cout << "By name : " << fun_name->Name << endl;
+			}
+			else
+			{
+				cout << "By ordinal : " << hex << value << endl;
+			}
+			first_thunk++;
+		}
+		cur++;
+		cout << endl;
+	}
+	return 0;
+}
 int main()
 {
-	char path[] = "C:\\PE\\advancedolly.dll";
+	char path[] = "C:\\PE\\PETool.exe";
 	//filebuffer_to_imagebuffer_to_disk(path);
 	LPVOID filebuffer;
 	DWORD filesize = readfile(path, &filebuffer);
@@ -335,6 +401,7 @@ int main()
 	}
 	//find_function_addressRVA_byname(filebuffer, "_ODBG_Plugindata");
 	//print_export_table(filebuffer);
-    print_relocation_table(filebuffer);
+    //print_relocation_table(filebuffer);
+	print_import_table(filebuffer);
 	return 0;
 }
